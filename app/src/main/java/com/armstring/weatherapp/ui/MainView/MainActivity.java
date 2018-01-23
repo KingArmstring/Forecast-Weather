@@ -5,7 +5,6 @@ import android.support.v4.app.Fragment;
 import android.support.v4.view.ViewPager;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -15,9 +14,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.armstring.weatherapp.R;
-import com.armstring.weatherapp.model.ForecastData;
-import com.armstring.weatherapp.callback.ForecastListAsyncResponse;
-import com.armstring.weatherapp.ui.adapter.ForecastViewPagerAdapter2;
+import com.armstring.weatherapp.contracts.MainContracts;
+import com.armstring.weatherapp.ui.ForecastFragment;
+import com.armstring.weatherapp.ui.MainView.adapter.ForecastViewPagerAdapter2;
 import com.armstring.weatherapp.bean.Forecast;
 import com.armstring.weatherapp.utils.network.NetworkHelper;
 import com.armstring.weatherapp.utils.Preferences;
@@ -25,10 +24,8 @@ import com.squareup.picasso.Picasso;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements MainContracts.MainView{
     public static final String TAG = "Armstring";
     private ForecastViewPagerAdapter2 forecastViewPagerAdapter;
 
@@ -41,6 +38,9 @@ public class MainActivity extends AppCompatActivity {
     private String enteredLocation;
     private boolean returned = false;
     private boolean firstTime = true;
+    private MainContracts.MainPresenter presenter;
+    private ArrayList<Forecast> forecastArrayList;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -48,25 +48,13 @@ public class MainActivity extends AppCompatActivity {
         final Preferences preferences = new Preferences(MainActivity.this);
         final String lastLocation = preferences.getLocation();
         final ConstraintLayout layout = (ConstraintLayout)findViewById(R.id.constraintLayoutId);
-        ConstraintLayout layoutMain = (ConstraintLayout)findViewById(R.id.constraintLayoutId2);
+        presenter = new MainPresenter(this);
+
         if(!NetworkHelper.hasNetworkStatus(MainActivity.this)){
             layout.setVisibility(View.INVISIBLE);
             Toast.makeText(MainActivity.this, "No Internet Connection", Toast.LENGTH_LONG).show();
         }
-        layoutMain.setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            public boolean onTouch(View view, MotionEvent motionEvent) {
-                if(layout.getVisibility() == View.INVISIBLE){
-                    if(NetworkHelper.hasNetworkStatus(MainActivity.this)){
-                        layout.setVisibility(View.VISIBLE);
-                        getWeather(lastLocation);
-                    }else{
-                        Toast.makeText(MainActivity.this, "No Internet Connection", Toast.LENGTH_LONG).show();
-                    }
-                }
-                return false;
-            }
-        });
+        handleNoInternetCase(lastLocation, layout);
         txtCurrentTemp = (TextView) findViewById(R.id.txtTemp);
         txtLocation = (TextView) findViewById(R.id.txtLocation);
         txtCurrentDate = (TextView) findViewById(R.id.txtCurrentDateId);
@@ -74,9 +62,8 @@ public class MainActivity extends AppCompatActivity {
         imgWeatherIcon = (ImageView) findViewById(R.id.imgWeatherIcon);
         mViewPager = findViewById(R.id.viewPagerId);
 
-
-
         getWeather(lastLocation);
+
         edtLocation.setOnKeyListener(new View.OnKeyListener() {
             @Override
             public boolean onKey(View view, int keyCode, KeyEvent keyEvent) {
@@ -95,56 +82,61 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             }
         });
+
     }
 
-    private void getWeather(String currentLocation) {
-        forecastViewPagerAdapter = new ForecastViewPagerAdapter2(getSupportFragmentManager(), getFragments(currentLocation));
+    @Override
+    public void getWeather(String currentLocation){
+        presenter.getForecastArrayList(currentLocation);
     }
 
-    private List<Fragment> getFragments(String loc){
+
+    @Override
+    public void applyData(ArrayList<Forecast> data) {
+        //getting date from model via presenter.
+        forecastArrayList = data;
+        //one time date filing
+        txtLocation.setText(forecastArrayList.get(0).getCity() + "\n" + forecastArrayList.get(0).getRegion());
+        txtCurrentTemp.setText(forecastArrayList.get(0).getCurrentTemp() + "C");
+        txtCurrentDate.setText(forecastArrayList.get(0).getDate());
+        String html = forecastArrayList.get(0).getHtmlDescription();
+        Picasso.with(MainActivity.this).load(presenter.getImageUrl(html)).into(imgWeatherIcon);
+
+
+        //viewPager date
+        forecastViewPagerAdapter = new ForecastViewPagerAdapter2(getSupportFragmentManager(), getFragments());
+        mViewPager.setAdapter(forecastViewPagerAdapter);
+    }
+
+
+
+    //helper method1
+    private List<Fragment> getFragments(){
         final List<Fragment> fragments = new ArrayList<>();
-        new ForecastData().getForecast(new ForecastListAsyncResponse() {
-            @Override
-            public void processFinished(ArrayList<Forecast> forecastArrayList) {
-                txtLocation.setText(forecastArrayList.get(0).getCity() + "\n" + forecastArrayList.get(0).getRegion());
-                txtCurrentTemp.setText(forecastArrayList.get(0).getCurrentTemp() + "C");
-                txtCurrentDate.setText(forecastArrayList.get(0).getDate());
-                String html = forecastArrayList.get(0).getHtmlDescription();
-                Picasso.with(MainActivity.this).load(getImageUrl(html)).into(imgWeatherIcon);
-                for(int i = 0; i < forecastArrayList.size(); i++){
-                    Forecast newForecast = forecastArrayList.get(i);
-                    Log.d(TAG, "processFinished: " + newForecast.getCity() + fragments.size());
-                    ForecastFragment fragment = ForecastFragment.newInstance(newForecast);
-                    fragments.add(fragment);
-                }
-
-//                Log.d(TAG, "processFinished: fragments.size()" + fragments.size());
-            }
-
-            @Override
-            public void setTheAdapter() {
-//                Log.d(TAG, "setTheAdapter: 1111111111");
-//                Log.d(TAG, "setTheAdapter: 1111111111 fragments.size(): " + fragments.size());
-
-                mViewPager.setAdapter(forecastViewPagerAdapter);
-
-
-            }
-        }, loc, getApplicationContext());
+        for(int i = 0; i < forecastArrayList.size(); i++){
+            Forecast newForecast = forecastArrayList.get(i);
+            ForecastFragment fragment = ForecastFragment.newInstance(newForecast);
+            fragments.add(fragment);
+        }
         return fragments;
     }
 
-    private String getImageUrl(String html){
-        String imgRegex = "(?i)<img[^>]+?src\\s*=\\s*['\"]([^'\"]+)['\"][^>]*>";
-        String imgSource = null;
-
-
-        Pattern p = Pattern.compile(imgRegex);
-        Matcher m = p.matcher(html);
-        while (m.find()){
-            Log.d(TAG, "getImageUrl: found");
-            imgSource = m.group(1);
-        }
-        return imgSource;
+    //helper method2
+    public void handleNoInternetCase(final String lastLocation, final ConstraintLayout layout) {
+        ConstraintLayout layoutMain = (ConstraintLayout)findViewById(R.id.constraintLayoutId2);
+        layoutMain.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View view, MotionEvent motionEvent) {
+                if(layout.getVisibility() == View.INVISIBLE){
+                    if(NetworkHelper.hasNetworkStatus(MainActivity.this)){
+                        layout.setVisibility(View.VISIBLE);
+                        getWeather(lastLocation);
+                    }else{
+                        Toast.makeText(MainActivity.this, "No Internet Connection", Toast.LENGTH_LONG).show();
+                    }
+                }
+                return false;
+            }
+        });
     }
 }
